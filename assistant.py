@@ -117,7 +117,6 @@ def parse_number(text):
     return 1
 
 # --- Reliable Hotkey Sender ---
-# Note: pyautogui maps 'alt' to Option and 'ctrl' to Control on macOS, so these Ctrl+Shift+Alt combos already translate.
 def send_shortcut(target_key):
     """Holds modifiers, presses the key, and releases."""
     pyautogui.keyDown('ctrl')
