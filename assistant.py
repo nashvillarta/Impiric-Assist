@@ -187,12 +187,11 @@ def trigger_action(name, key, amount=1):
 
 def trigger_clear_screens():
     """Triggered by 'B One' to minimize windows and clear screens."""
-    if IS_WINDOWS:
-        print("\n[ACTION] B One -> Clearing screens (Win+D)...")
-        pyautogui.hotkey('win', 'd')
-    else:
-        print("\n[ACTION] B One -> Clearing screens (F11 Show Desktop)...")
-        pyautogui.press('f11')
+    if not IS_WINDOWS:
+        print("\n[ACTION] B One -> Clear screens is Windows-only (SpaceWalker); skipping.")
+        return
+    print("\n[ACTION] B One -> Clearing screens (Win+D)...")
+    pyautogui.hotkey('win', 'd')
 
 def trigger_toggle_planes():
     """Triggered by 'A One' to lock/unlock all 3 orientation planes (X, Y, Z)."""
