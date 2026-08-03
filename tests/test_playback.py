@@ -56,7 +56,7 @@ class TestPlayback(unittest.TestCase):
 
     def test_real_play_wav_pauses_then_resumes_stream(self):
         """Uses a real generated WAV, so this exercises actual playback."""
-        path = os.path.join(assistant.VOICE_DIR, "tone-pleasant.wav")
+        path = os.path.join(assistant.VOICE_DIR, "okay.wav")
         if not os.path.exists(path):
             self.skipTest("voice pack not generated; run tools/generate_voice_pack.py")
         stream = FakeStream()
@@ -65,7 +65,7 @@ class TestPlayback(unittest.TestCase):
 
     def test_stream_resumes_even_when_playback_raises(self):
         stream = FakeStream()
-        path = os.path.join(assistant.VOICE_DIR, "tone-pleasant.wav")
+        path = os.path.join(assistant.VOICE_DIR, "okay.wav")
         if not os.path.exists(path):
             self.skipTest("voice pack not generated; run tools/generate_voice_pack.py")
         original_run = assistant.subprocess.run
@@ -75,11 +75,6 @@ class TestPlayback(unittest.TestCase):
         assistant.subprocess.run = boom
         self.assertFalse(self.real_play_wav(path, stream))
         self.assertEqual(stream.events, ["stop", "start"], "mic must resume even on failure")
-
-    def test_tone_falls_back_without_crashing(self):
-        self._stub_play(False)
-        assistant.play_error_tone()
-
 
 if __name__ == "__main__":
     unittest.main()

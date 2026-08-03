@@ -67,31 +67,6 @@ def speak(text, stream=None):
     _speak_native(text)
 
 
-# --- Custom Tones ---
-def _play_tone(name):
-    """Plays a pre-rendered tone, falling back to winsound.Beep on Windows."""
-    if _play_wav(os.path.join(VOICE_DIR, f"tone-{name}.wav")):
-        return
-    if IS_WINDOWS:
-        for freq, ms in voice_lines.TONES[name]:
-            winsound.Beep(freq, ms)
-
-
-def play_startup_chime():
-    _play_tone("startup")
-
-
-def play_pleasant_tone():
-    _play_tone("pleasant")
-
-
-def play_cancel_tone():
-    _play_tone("cancel")
-
-
-def play_error_tone():
-    _play_tone("error")
-
 # --- Confirmation Listener ---
 def confirm_action(action_description, stream, recognizer, timeout_seconds=5):
     """Asks the user for confirmation and listens for a Yes/No answer (Reads partials for 0ms latency)."""
@@ -122,16 +97,14 @@ def confirm_action(action_description, stream, recognizer, timeout_seconds=5):
             # The second it sees these words, it triggers. No waiting for silence!
             if any(w in text for w in ["yes", "yeah", "yup", "confirm", "do it", "ok", "okay", "sure", "ya", "aye"]):
                 print(f"\nConfirmation response caught: \"{text}\"")
-                play_pleasant_tone()
+                speak("Okay.", stream)
                 return True
             elif any(w in text for w in ["no", "nope", "cancel", "stop", "dont", "don't", "nah"]):
                 print(f"\nConfirmation response caught: \"{text}\"")
-                play_cancel_tone()
                 speak("Command cancelled.", stream)
                 return False
 
     print("\n[CONFIRMATION TIMEOUT] No confirmation received.")
-    play_cancel_tone()
     speak("Timed out. Action cancelled.", stream)
     return False
 
@@ -342,7 +315,7 @@ def process_and_execute(phrase, stream, recognizer):
             send_shortcut('7')
     else:
         print(f"\n[ACTION] Unknown intent.")
-        play_error_tone()
+        speak("Sorry, I did not understand that.", stream)
 
 def main():
     if not os.path.exists("model"):
@@ -367,7 +340,7 @@ def main():
     if not IS_WINDOWS:
         print("[macOS] Grant Terminal Accessibility permission (System Settings > Privacy & Security > Accessibility) so keystrokes reach other apps, and bind F11 to Show Desktop.")
 
-    play_startup_chime()
+    speak("Assistant ready.", stream)
     print("\nReady! Listening...\n")
 
     listening_for_command = False
@@ -394,8 +367,8 @@ def main():
                     
                     if command_part: 
                         process_and_execute(command_part, stream, recognizer)
-                    else: 
-                        play_pleasant_tone()
+                    else:
+                        speak("Listening.", stream)
                         print("--> Wake word acknowledged! Listening for command...")
                         listening_for_command = True
 

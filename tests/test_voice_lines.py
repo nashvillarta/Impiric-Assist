@@ -3,8 +3,8 @@ import voice_lines
 
 
 class TestVoiceLines(unittest.TestCase):
-    def test_speech_line_count_is_32(self):
-        self.assertEqual(len(voice_lines.all_speech_lines()), 32)
+    def test_speech_line_count_is_36(self):
+        self.assertEqual(len(voice_lines.all_speech_lines()), 36)
 
     def test_no_duplicate_lines(self):
         lines = voice_lines.all_speech_lines()
@@ -36,9 +36,10 @@ class TestVoiceLines(unittest.TestCase):
             self.assertIn(f"Confirm: Push displays away by {n}?", lines)
             self.assertIn(f"Confirm: Pull displays closer by {n}?", lines)
 
-    def test_four_tones_defined(self):
-        self.assertEqual(set(voice_lines.TONES), {"startup", "pleasant", "cancel", "error"})
-        self.assertEqual(voice_lines.TONES["startup"], [(440, 150), (554, 150), (659, 150), (880, 300)])
+    def test_feedback_lines_present(self):
+        lines = voice_lines.all_speech_lines()
+        for line in voice_lines.FEEDBACK_LINES:
+            self.assertIn(line, lines)
 
 
 if __name__ == "__main__":

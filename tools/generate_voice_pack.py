@@ -1,8 +1,7 @@
 """Renders the voice pack. Run this offline; the WAVs are what ship.
 
-Two producers:
+One producer:
   - speech: Qwen3-TTS (--engine qwen) or the platform's native TTS (--engine native)
-  - tones:  sine synthesis, always. Qwen does not generate beeps.
 
 --engine native exists so the whole playback pipeline can be built and verified
 on a machine without a GPU. Rerun with --engine qwen on the Windows box to swap
@@ -11,45 +10,15 @@ in the real voice; the file layout and manifest are identical either way.
 
 import argparse
 import json
-import math
 import os
-import struct
 import subprocess
 import sys
-import wave
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import voice_lines
 
 SAMPLE_RATE = 44100
 IS_WINDOWS = sys.platform == "win32"
-
-
-def write_wav(path, frames, rate=SAMPLE_RATE):
-    """Writes 16-bit mono PCM bytes to a WAV file."""
-    with wave.open(path, "wb") as w:
-        w.setnchannels(1)
-        w.setsampwidth(2)
-        w.setframerate(rate)
-        w.writeframes(frames)
-
-
-def synth_tone(steps):
-    """Builds 16-bit mono PCM for a sequence of (freq, ms) beeps, with 5ms fades."""
-    frames = bytearray()
-    for freq, ms in steps:
-        n_samples = int(SAMPLE_RATE * ms / 1000)
-        fade_samples = min(int(SAMPLE_RATE * 0.005), n_samples // 2)
-        for i in range(n_samples):
-            fade = 1.0
-            if fade_samples:
-                if i < fade_samples:
-                    fade = i / fade_samples
-                elif i > n_samples - fade_samples:
-                    fade = (n_samples - i) / fade_samples
-            value = int(32767 * fade * math.sin(2 * math.pi * freq * i / SAMPLE_RATE))
-            frames += struct.pack("<h", value)
-    return bytes(frames)
 
 
 def speak_native(text, out_path):
@@ -103,25 +72,17 @@ def main():
             speak_native(text, path)
         manifest_lines[text] = name
 
-    manifest_tones = {}
-    for tone_name, steps in voice_lines.TONES.items():
-        name = f"tone-{tone_name}.wav"
-        print(f"  [tone] {tone_name}")
-        write_wav(os.path.join(out_dir, name), synth_tone(steps))
-        manifest_tones[tone_name] = name
-
     manifest = {
         "engine": args.engine,
         "speaker": args.speaker if args.engine == "qwen" else "platform-native",
         "model": args.model if args.engine == "qwen" else None,
         "sample_rate": SAMPLE_RATE,
         "lines": manifest_lines,
-        "tones": manifest_tones,
     }
     with open(os.path.join(out_dir, "manifest.json"), "w") as f:
         json.dump(manifest, f, indent=2)
 
-    print(f"\nDone. {len(manifest_lines)} speech + {len(manifest_tones)} tone files in {out_dir}")
+    print(f"\nDone. {len(manifest_lines)} speech files in {out_dir}")
 
 
 if __name__ == "__main__":

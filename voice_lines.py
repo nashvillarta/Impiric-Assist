@@ -29,13 +29,13 @@ STANDALONE_LINES = [
     "Timed out. Action cancelled.",
 ]
 
-# Tone name -> list of (frequency Hz, duration ms). These are beeps, not speech.
-TONES = {
-    "startup": [(440, 150), (554, 150), (659, 150), (880, 300)],
-    "pleasant": [(587, 80), (880, 120)],
-    "cancel": [(880, 80), (587, 120)],
-    "error": [(300, 150), (250, 200)],
-}
+# Spoken feedback lines that replace the old beeps/chimes.
+FEEDBACK_LINES = [
+    "Assistant ready.",
+    "Listening.",
+    "Okay.",
+    "Sorry, I did not understand that.",
+]
 
 
 def confirm_line(description):
@@ -44,12 +44,13 @@ def confirm_line(description):
 
 
 def all_speech_lines():
-    """Every distinct string the assistant can speak. Closed set, 32 entries."""
+    """Every distinct string the assistant can speak. Closed set, 36 entries."""
     lines = [confirm_line(d) for d in FIXED_DESCRIPTIONS]
     for n in range(1, MAX_AMOUNT + 1):
         lines.append(confirm_line(f"Push displays away by {n}"))
         lines.append(confirm_line(f"Pull displays closer by {n}"))
     lines.extend(STANDALONE_LINES)
+    lines.extend(FEEDBACK_LINES)
     return lines
 
 

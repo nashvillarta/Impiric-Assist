@@ -38,10 +38,6 @@ class TestNoVoiceLineDrift(unittest.TestCase):
         "trigger_toggle_planes",
         "speak",
         "query_ollama",
-        "play_startup_chime",
-        "play_pleasant_tone",
-        "play_cancel_tone",
-        "play_error_tone",
     )
 
     def setUp(self):
@@ -60,8 +56,6 @@ class TestNoVoiceLineDrift(unittest.TestCase):
             setattr(assistant, name, lambda *a, **k: None)
         assistant.speak = lambda *a, **k: None
         assistant.query_ollama = lambda text: {"action": "unknown", "amount": 1}
-        for name in ("play_startup_chime", "play_pleasant_tone", "play_cancel_tone", "play_error_tone"):
-            setattr(assistant, name, lambda *a, **k: None)
 
     def test_fast_path_descriptions_all_have_voice_lines(self):
         for phrase in FAST_PATH_PHRASES:
