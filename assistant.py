@@ -124,7 +124,7 @@ def confirm_action(action_description, stream, recognizer, timeout_seconds=5):
 
 # --- Number Parsing Helper ---
 def parse_number(text):
-    number_words = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10}
+    number_words = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10, "too": 2}  # "to"/"for" deliberately excluded: too ambiguous, they show up in normal command phrases
     for word in text.split():
         if word.isdigit():
              return int(word)
@@ -274,7 +274,7 @@ def process_and_execute(phrase, stream, recognizer):
         return
 
     # 5. Quick Pull
-    if any(word in phrase for word in ["pull", "pool", "pole", "closer", "near", "all by", "oh by"]):
+    if any(word in phrase for word in ["pull", "pool", "pole", "closer", "near", "all by", "oh by", "poll", "paul", "cool"]):
         amount = parse_number(phrase)
         if confirm_action(f"Pull displays closer by {amount}", stream, recognizer):
             trigger_action("Pull", 'up', amount)
