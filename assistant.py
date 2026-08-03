@@ -1,10 +1,16 @@
-import winsound
+import sys
+
+IS_WINDOWS = sys.platform == "win32"
+if IS_WINDOWS:
+    import winsound
 import pyautogui
 import pyaudio
 import json
 import time
 import os
-import sys
+import math
+import struct
+import subprocess
 import requests
 import webbrowser
 from vosk import Model, KaldiRecognizer
@@ -17,29 +23,61 @@ def speak(text):
     """Prints text and speaks it out loud using Windows Native TTS (Offline)."""
     print(f"\n[AI Voice]: \"{text}\"")
     try:
-        escaped_text = text.replace("'", "")
-        os.system(f'powershell -Command "Add-Type -AssemblyName System.Speech; (New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak(\'{escaped_text}\')"')
+        if IS_WINDOWS:
+            escaped_text = text.replace("'", "")
+            os.system(f'powershell -Command "Add-Type -AssemblyName System.Speech; (New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak(\'{escaped_text}\')"')
+        else:
+            subprocess.run(["say", text])
     except Exception as e:
         print(f"[TTS Warning] Could not initialize voice engine: {e}")
 
 # --- Custom Tones ---
+def _beep(freq, ms):
+    """Plays a tone at freq Hz for ms milliseconds."""
+    if IS_WINDOWS:
+        winsound.Beep(freq, ms)
+        return
+
+    try:
+        rate = 44100
+        n_samples = int(rate * ms / 1000)
+        fade_samples = min(int(rate * 0.005), n_samples // 2)
+        samples = bytearray()
+        for i in range(n_samples):
+            fade = 1.0
+            if i < fade_samples:
+                fade = i / fade_samples
+            elif i > n_samples - fade_samples:
+                fade = (n_samples - i) / fade_samples
+            value = int(32767 * fade * math.sin(2 * math.pi * freq * i / rate))
+            samples += struct.pack('<h', value)
+
+        p = pyaudio.PyAudio()
+        stream = p.open(format=pyaudio.paInt16, channels=1, rate=rate, output=True)
+        stream.write(bytes(samples))
+        stream.stop_stream()
+        stream.close()
+        p.terminate()
+    except Exception:
+        pass
+
 def play_startup_chime():
-    winsound.Beep(440, 150)
-    winsound.Beep(554, 150)
-    winsound.Beep(659, 150)
-    winsound.Beep(880, 300)
+    _beep(440, 150)
+    _beep(554, 150)
+    _beep(659, 150)
+    _beep(880, 300)
 
 def play_pleasant_tone():
-    winsound.Beep(587, 80)
-    winsound.Beep(880, 120)
+    _beep(587, 80)
+    _beep(880, 120)
 
 def play_cancel_tone():
-    winsound.Beep(880, 80)
-    winsound.Beep(587, 120)
+    _beep(880, 80)
+    _beep(587, 120)
 
 def play_error_tone():
-    winsound.Beep(300, 150)
-    winsound.Beep(250, 200)
+    _beep(300, 150)
+    _beep(250, 200)
 
 # --- Confirmation Listener ---
 def confirm_action(action_description, stream, recognizer, timeout_seconds=5):
@@ -95,6 +133,7 @@ def parse_number(text):
     return 1
 
 # --- Reliable Hotkey Sender ---
+# Note: pyautogui maps 'alt' to Option and 'ctrl' to Control on macOS, so these Ctrl+Shift+Alt combos already translate.
 def send_shortcut(target_key):
     """Holds modifiers, presses the key, and releases."""
     pyautogui.keyDown('ctrl')
@@ -135,8 +174,12 @@ def trigger_action(name, key, amount=1):
 
 def trigger_clear_screens():
     """Triggered by 'B One' to minimize windows and clear screens."""
-    print("\n[ACTION] B One -> Clearing screens (Win+D)...")
-    pyautogui.hotkey('win', 'd')
+    if IS_WINDOWS:
+        print("\n[ACTION] B One -> Clearing screens (Win+D)...")
+        pyautogui.hotkey('win', 'd')
+    else:
+        print("\n[ACTION] B One -> Clearing screens (F11 Show Desktop)...")
+        pyautogui.press('f11')
 
 def trigger_toggle_planes():
     """Triggered by 'A One' to lock/unlock all 3 orientation planes (X, Y, Z)."""
@@ -308,7 +351,10 @@ def main():
     print("  - 'Computer A One' : Lock/Unlock orientation")
     print("  - 'Computer Open Gemini' : Launches Gemini Web Chat")
     print("==================================================")
-    
+
+    if not IS_WINDOWS:
+        print("[macOS] Grant Terminal Accessibility permission (System Settings > Privacy & Security > Accessibility) so keystrokes reach other apps, and bind F11 to Show Desktop.")
+
     play_startup_chime()
     print("\nReady! Listening...\n")
 
