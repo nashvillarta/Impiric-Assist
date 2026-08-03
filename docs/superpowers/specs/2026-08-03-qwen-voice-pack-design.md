@@ -23,13 +23,22 @@ assistant.py:117  speak("Command cancelled.")
 assistant.py:122  speak("Timed out. Action cancelled.")
 ```
 
-`action_description` comes from a fixed set: 9 constant strings (`Clear screens`,
-`Recenter displays`, `Open Gemini`, five layout names, lock/unlock planes) plus two
-parameterized by an amount that `parse_number` caps at ten. **31 distinct utterances,
-total.** The assistant never speaks arbitrary text.
+`action_description` comes from a fixed set of **10** constant strings — `Lock orientation
+planes` and `Unlock orientation planes` (two distinct strings, from `state_str`),
+`Clear screens`, `Recenter displays`, `Open Gemini`, and five layout names — plus two
+parameterized by an amount that `parse_number` caps at ten.
 
-So it needs no TTS engine at runtime — it needs 31 WAV files. Generation is a one-time
-offline batch; playback is a dictionary lookup.
+| Group | Count |
+|---|---|
+| `Confirm: <fixed description>?` | 10 |
+| `Confirm: Push displays away by 1-10?` | 10 |
+| `Confirm: Pull displays closer by 1-10?` | 10 |
+| `Command cancelled.` / `Timed out. Action cancelled.` | 2 |
+| **Total speech lines** | **32** |
+
+The assistant never speaks arbitrary text. So it needs no TTS engine at runtime — it needs
+32 WAV files (plus 4 tones = 36 files). Generation is a one-time offline batch; playback is
+a dictionary lookup.
 
 This removes every objection to using a neural TTS here: no inference inside the
 5-second confirmation window, no VRAM held at runtime (relevant — phi3 already occupies
@@ -45,13 +54,13 @@ Single source of truth for every speakable string, plus the deterministic `text 
 filename function. Dependency-free on purpose: the generator imports it without needing
 pyaudio, vosk, or pyautogui installed.
 
-Exposes the 31 speech lines and the 4 tone identifiers.
+Exposes the 32 speech lines and the 4 tone identifiers.
 
 ### `tools/generate_voice_pack.py` (new)
 
 The only place `qwen-tts` and torch appear. Two producers, one output directory:
 
-- **Speech (31 files):** Qwen3-TTS, configured preset speaker.
+- **Speech (32 files):** Qwen3-TTS, configured preset speaker.
 - **Tones (4 files):** sine synthesis — the existing `_beep` math, moved here.
   Qwen does not generate these; they are beeps, not speech.
 
@@ -116,7 +125,7 @@ code actually says, discovered as unexplained silence mid-command.
 1. **Drift test (the important one).** Drive `process_and_execute` across every intent
    using the existing stub harness pattern, capture every `confirm_action` description
    produced, and assert each exists in `voice_lines`. Drift becomes a failing test.
-2. **Slug determinism.** `slug(text)` is stable and collision-free across all 31 lines.
+2. **Slug determinism.** `slug(text)` is stable and collision-free across all 32 lines.
 3. **Fallback.** With an empty `voice/`, `speak()` still reaches native TTS.
 4. **Manifest completeness.** Every line in `voice_lines` has a file in the manifest.
 
