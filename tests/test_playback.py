@@ -3,6 +3,10 @@ import sys
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+if sys.platform != "win32":
+    raise unittest.SkipTest("assistant.py is Windows-only; these tests require Windows")
+
 import assistant
 
 

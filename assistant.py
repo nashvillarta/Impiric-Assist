@@ -1,8 +1,6 @@
 import sys
 
-IS_WINDOWS = sys.platform == "win32"
-if IS_WINDOWS:
-    import winsound
+import winsound
 import pyautogui
 import pyaudio
 import json
@@ -33,10 +31,7 @@ def _play_wav(path, stream=None):
         if stream is not None:
             stream.stop_stream()
         try:
-            if IS_WINDOWS:
-                winsound.PlaySound(path, winsound.SND_FILENAME)
-            else:
-                subprocess.run(["afplay", path])
+            winsound.PlaySound(path, winsound.SND_FILENAME)
         finally:
             if stream is not None:
                 stream.start_stream()
@@ -49,17 +44,14 @@ def _play_wav(path, stream=None):
 def _speak_native(text):
     """Platform TTS. Only reached when the voice pack has no line for this text."""
     try:
-        if IS_WINDOWS:
-            # Text goes in over stdin, never interpolated into the command line:
-            # it can carry an LLM-supplied amount, and os.system would make that
-            # a shell injection (stripping ' does not stop " or ; or $(...)).
-            script = (
-                "Add-Type -AssemblyName System.Speech; "
-                "(New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak([Console]::In.ReadToEnd())"
-            )
-            subprocess.run(["powershell", "-Command", script], input=text, text=True)
-        else:
-            subprocess.run(["say", text])
+        # Text goes in over stdin, never interpolated into the command line:
+        # it can carry an LLM-supplied amount, and os.system would make that
+        # a shell injection (stripping ' does not stop " or ; or $(...)).
+        script = (
+            "Add-Type -AssemblyName System.Speech; "
+            "(New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak([Console]::In.ReadToEnd())"
+        )
+        subprocess.run(["powershell", "-Command", script], input=text, text=True)
     except Exception as e:
         print(f"[TTS Warning] Could not initialize voice engine: {e}")
 
@@ -166,9 +158,6 @@ def trigger_action(name, key, amount=1):
 
 def trigger_clear_screens():
     """Triggered by 'B One' to minimize windows and clear screens."""
-    if not IS_WINDOWS:
-        print("\n[ACTION] B One -> Clear screens is Windows-only (SpaceWalker); skipping.")
-        return
     print("\n[ACTION] B One -> Clearing screens (Win+D)...")
     pyautogui.hotkey('win', 'd')
 
@@ -347,9 +336,6 @@ def main():
     print("  - 'Computer A One' : Lock/Unlock orientation")
     print("  - 'Computer Open Gemini' : Launches Gemini Web Chat")
     print("==================================================")
-
-    if not IS_WINDOWS:
-        print("[macOS] Grant Terminal Accessibility permission (System Settings > Privacy & Security > Accessibility) so keystrokes reach other apps. Note: 'B One' (clear screens) is Windows-only.")
 
     speak("Assistant ready.", stream)
     print("\nReady! Listening...\n")

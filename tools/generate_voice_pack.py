@@ -1,11 +1,12 @@
 """Renders the voice pack. Run this offline; the WAVs are what ship.
 
 One producer:
-  - speech: Qwen3-TTS (--engine qwen) or the platform's native TTS (--engine native)
+  - speech: Qwen3-TTS (--engine qwen) or Windows' native TTS (--engine native)
 
 --engine native exists so the whole playback pipeline can be built and verified
-on a machine without a GPU. Rerun with --engine qwen on the Windows box to swap
-in the real voice; the file layout and manifest are identical either way.
+without a GPU, using the Windows SAPI voice built into System.Speech. Rerun
+with --engine qwen to swap in the real voice; the file layout and manifest are
+identical either way.
 
 Use --voice to pick a voice for either engine (a native OS voice name, or a
 Qwen3-TTS preset speaker), and --list-voices to see what's available for the
@@ -15,7 +16,6 @@ current --engine without generating anything.
 import argparse
 import json
 import os
-import re
 import subprocess
 import sys
 
@@ -23,7 +23,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import voice_lines
 
 SAMPLE_RATE = 44100
-IS_WINDOWS = sys.platform == "win32"
 
 QWEN_VOICES = [
     "Vivian", "Serena", "Uncle_Fu", "Dylan", "Eric", "Ryan", "Aiden", "Ono_Anna", "Sohee",
@@ -31,37 +30,23 @@ QWEN_VOICES = [
 
 
 def speak_native(text, out_path, voice=None):
-    """Renders one line with the platform's built-in TTS."""
-    if IS_WINDOWS:
-        # Windows voice names (e.g. "Microsoft Zira Desktop") differ from macOS
-        # `say` voice names (e.g. "Daniel") -- SelectVoice is wrapped so an
-        # unrecognized name warns and falls back to the default voice instead
-        # of aborting the whole run.
-        select = ""
-        if voice:
-            select = (
-                f"try {{ $s.SelectVoice('{voice}') }} "
-                f"catch {{ Write-Warning \"voice '{voice}' not found; using default\" }}; "
-            )
-        script = (
-            "Add-Type -AssemblyName System.Speech; "
-            "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
-            f"{select}"
-            f"$s.SetOutputToWaveFile('{out_path}'); $s.Speak([Console]::In.ReadToEnd()); $s.Dispose()"
-        )
-        subprocess.run(["powershell", "-Command", script], input=text, text=True, check=True)
-        return
-    aiff = out_path + ".aiff"
-    say_cmd = ["say"]
+    """Renders one line with Windows' built-in TTS."""
+    # Windows voice names (e.g. "Microsoft Zira Desktop") -- SelectVoice is
+    # wrapped so an unrecognized name warns and falls back to the default
+    # voice instead of aborting the whole run.
+    select = ""
     if voice:
-        say_cmd += ["-v", voice]
-    say_cmd += ["-o", aiff, text]
-    subprocess.run(say_cmd, check=True)
-    subprocess.run(
-        ["afconvert", "-f", "WAVE", "-d", f"LEI16@{SAMPLE_RATE}", "-c", "1", aiff, out_path],
-        check=True,
+        select = (
+            f"try {{ $s.SelectVoice('{voice}') }} "
+            f"catch {{ Write-Warning \"voice '{voice}' not found; using default\" }}; "
+        )
+    script = (
+        "Add-Type -AssemblyName System.Speech; "
+        "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
+        f"{select}"
+        f"$s.SetOutputToWaveFile('{out_path}'); $s.Speak([Console]::In.ReadToEnd()); $s.Dispose()"
     )
-    os.remove(aiff)
+    subprocess.run(["powershell", "-Command", script], input=text, text=True, check=True)
 
 
 def speak_qwen(text, out_path, model, voice, engine_state={}):
@@ -73,23 +58,13 @@ def speak_qwen(text, out_path, model, voice, engine_state={}):
 
 
 def list_voices_native():
-    """Prints installed native TTS voices for the current platform."""
-    if IS_WINDOWS:
-        script = (
-            "Add-Type -AssemblyName System.Speech; "
-            "(New-Object System.Speech.Synthesis.SpeechSynthesizer).GetInstalledVoices() | "
-            "ForEach-Object { $_.VoiceInfo.Name }"
-        )
-        subprocess.run(["powershell", "-Command", script], check=True)
-        return
-    result = subprocess.run(["say", "-v", "?"], check=True, capture_output=True, text=True)
-    for line in result.stdout.splitlines():
-        # Fixed-width columns: name, locale (e.g. en_US), then a "# ..." sample.
-        # Names can contain single spaces (e.g. "Bad News"), so split on runs
-        # of 2+ spaces rather than on any whitespace.
-        columns = re.split(r"\s{2,}", line.strip())
-        if len(columns) >= 2 and columns[1].startswith("en_"):
-            print(line)
+    """Prints installed Windows TTS voices."""
+    script = (
+        "Add-Type -AssemblyName System.Speech; "
+        "(New-Object System.Speech.Synthesis.SpeechSynthesizer).GetInstalledVoices() | "
+        "ForEach-Object { $_.VoiceInfo.Name }"
+    )
+    subprocess.run(["powershell", "-Command", script], check=True)
 
 
 def list_voices_qwen():
