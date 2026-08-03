@@ -50,8 +50,14 @@ def _speak_native(text):
     """Platform TTS. Only reached when the voice pack has no line for this text."""
     try:
         if IS_WINDOWS:
-            escaped_text = text.replace("'", "")
-            os.system(f'powershell -Command "Add-Type -AssemblyName System.Speech; (New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak(\'{escaped_text}\')"')
+            # Text goes in over stdin, never interpolated into the command line:
+            # it can carry an LLM-supplied amount, and os.system would make that
+            # a shell injection (stripping ' does not stop " or ; or $(...)).
+            script = (
+                "Add-Type -AssemblyName System.Speech; "
+                "(New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak([Console]::In.ReadToEnd())"
+            )
+            subprocess.run(["powershell", "-Command", script], input=text, text=True)
         else:
             subprocess.run(["say", text])
     except Exception as e:
@@ -276,7 +282,12 @@ def process_and_execute(phrase, stream, recognizer):
     print("Thinking (LLM)...")
     intent_data = query_ollama(phrase)
     action = intent_data.get("action", "unknown")
-    amount = intent_data.get("amount", 1)
+    # The LLM can return anything here, so clamp it to a sane int before it
+    # reaches a spoken string or range(). Also keeps it inside the voiced range.
+    try:
+        amount = max(1, min(int(intent_data.get("amount", 1)), voice_lines.MAX_AMOUNT))
+    except (TypeError, ValueError):
+        amount = 1
     
     if action == "recenter":
         if confirm_action("Recenter displays", stream, recognizer):
@@ -338,7 +349,7 @@ def main():
     print("==================================================")
 
     if not IS_WINDOWS:
-        print("[macOS] Grant Terminal Accessibility permission (System Settings > Privacy & Security > Accessibility) so keystrokes reach other apps, and bind F11 to Show Desktop.")
+        print("[macOS] Grant Terminal Accessibility permission (System Settings > Privacy & Security > Accessibility) so keystrokes reach other apps. Note: 'B One' (clear screens) is Windows-only.")
 
     speak("Assistant ready.", stream)
     print("\nReady! Listening...\n")
