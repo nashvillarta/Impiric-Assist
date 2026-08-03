@@ -8,20 +8,46 @@ import pyaudio
 import json
 import time
 import os
-import math
-import struct
 import subprocess
 import requests
 import webbrowser
+import voice_lines
 from vosk import Model, KaldiRecognizer
 
 # --- Global State ---
 PLANES_LOCKED = False
 
-# --- AI Voice (Text-to-Speech) Setup ---
-def speak(text):
-    """Prints text and speaks it out loud using Windows Native TTS (Offline)."""
-    print(f"\n[AI Voice]: \"{text}\"")
+# --- Voice Pack (pre-rendered audio, see tools/generate_voice_pack.py) ---
+VOICE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "voice")
+
+
+def _play_wav(path, stream=None):
+    """Plays a WAV, pausing the mic so the assistant does not hear itself.
+
+    Returns True if it played. Blocking on purpose: speech must finish before
+    confirm_action starts listening.
+    """
+    if not os.path.exists(path):
+        return False
+    try:
+        if stream is not None:
+            stream.stop_stream()
+        try:
+            if IS_WINDOWS:
+                winsound.PlaySound(path, winsound.SND_FILENAME)
+            else:
+                subprocess.run(["afplay", path])
+        finally:
+            if stream is not None:
+                stream.start_stream()
+        return True
+    except Exception as e:
+        print(f"[Voice Warning] Could not play {os.path.basename(path)}: {e}")
+        return False
+
+
+def _speak_native(text):
+    """Platform TTS. Only reached when the voice pack has no line for this text."""
     try:
         if IS_WINDOWS:
             escaped_text = text.replace("'", "")
@@ -31,58 +57,45 @@ def speak(text):
     except Exception as e:
         print(f"[TTS Warning] Could not initialize voice engine: {e}")
 
-# --- Custom Tones ---
-def _beep(freq, ms):
-    """Plays a tone at freq Hz for ms milliseconds."""
-    if IS_WINDOWS:
-        winsound.Beep(freq, ms)
+
+# --- AI Voice (Text-to-Speech) Setup ---
+def speak(text, stream=None):
+    """Prints text and speaks it, preferring the pre-rendered voice pack."""
+    print(f"\n[AI Voice]: \"{text}\"")
+    if _play_wav(os.path.join(VOICE_DIR, voice_lines.slug(text) + ".wav"), stream):
         return
+    _speak_native(text)
 
-    try:
-        rate = 44100
-        n_samples = int(rate * ms / 1000)
-        fade_samples = min(int(rate * 0.005), n_samples // 2)
-        samples = bytearray()
-        for i in range(n_samples):
-            fade = 1.0
-            if i < fade_samples:
-                fade = i / fade_samples
-            elif i > n_samples - fade_samples:
-                fade = (n_samples - i) / fade_samples
-            value = int(32767 * fade * math.sin(2 * math.pi * freq * i / rate))
-            samples += struct.pack('<h', value)
 
-        p = pyaudio.PyAudio()
-        stream = p.open(format=pyaudio.paInt16, channels=1, rate=rate, output=True)
-        stream.write(bytes(samples))
-        stream.stop_stream()
-        stream.close()
-        p.terminate()
-    except Exception:
-        pass
+# --- Custom Tones ---
+def _play_tone(name):
+    """Plays a pre-rendered tone, falling back to winsound.Beep on Windows."""
+    if _play_wav(os.path.join(VOICE_DIR, f"tone-{name}.wav")):
+        return
+    if IS_WINDOWS:
+        for freq, ms in voice_lines.TONES[name]:
+            winsound.Beep(freq, ms)
+
 
 def play_startup_chime():
-    _beep(440, 150)
-    _beep(554, 150)
-    _beep(659, 150)
-    _beep(880, 300)
+    _play_tone("startup")
+
 
 def play_pleasant_tone():
-    _beep(587, 80)
-    _beep(880, 120)
+    _play_tone("pleasant")
+
 
 def play_cancel_tone():
-    _beep(880, 80)
-    _beep(587, 120)
+    _play_tone("cancel")
+
 
 def play_error_tone():
-    _beep(300, 150)
-    _beep(250, 200)
+    _play_tone("error")
 
 # --- Confirmation Listener ---
 def confirm_action(action_description, stream, recognizer, timeout_seconds=5):
     """Asks the user for confirmation and listens for a Yes/No answer (Reads partials for 0ms latency)."""
-    speak(f"Confirm: {action_description}?")
+    speak(f"Confirm: {action_description}?", stream)
     print(f"\n[CONFIRMATION REQUIRED] Say 'Yes' to execute or 'No' to cancel... (Listening for {timeout_seconds}s)")
     
     start_time = time.time()
@@ -114,12 +127,12 @@ def confirm_action(action_description, stream, recognizer, timeout_seconds=5):
             elif any(w in text for w in ["no", "nope", "cancel", "stop", "dont", "don't", "nah"]):
                 print(f"\nConfirmation response caught: \"{text}\"")
                 play_cancel_tone()
-                speak("Command cancelled.")
+                speak("Command cancelled.", stream)
                 return False
 
     print("\n[CONFIRMATION TIMEOUT] No confirmation received.")
     play_cancel_tone()
-    speak("Timed out. Action cancelled.")
+    speak("Timed out. Action cancelled.", stream)
     return False
 
 # --- Number Parsing Helper ---
