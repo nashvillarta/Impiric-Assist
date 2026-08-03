@@ -699,9 +699,29 @@ LLM_ONLY_DESCRIPTIONS = [
 
 
 class TestNoVoiceLineDrift(unittest.TestCase):
+    # Every assistant attribute this test replaces. unittest discover runs all
+    # modules in one process, so these MUST be restored or they leak into
+    # tests/test_playback.py (which sorts after this file) and break it.
+    STUBBED = (
+        "confirm_action",
+        "send_shortcut",
+        "trigger_action",
+        "trigger_clear_screens",
+        "trigger_toggle_planes",
+        "speak",
+        "query_ollama",
+        "play_startup_chime",
+        "play_pleasant_tone",
+        "play_cancel_tone",
+        "play_error_tone",
+    )
+
     def setUp(self):
         """Stub every actuation surface. No keystroke may escape a test."""
         self.descriptions = []
+        # getattr runs now, so each cleanup captures the ORIGINAL function.
+        for name in self.STUBBED:
+            self.addCleanup(setattr, assistant, name, getattr(assistant, name))
 
         def fake_confirm(description, stream, recognizer, timeout_seconds=5):
             self.descriptions.append(description)
