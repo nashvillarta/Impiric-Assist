@@ -74,7 +74,7 @@ def speak(text, stream=None):
 
 
 # --- Confirmation Listener ---
-def confirm_action(action_description, stream, recognizer, timeout_seconds=5):
+def confirm_action(action_description, stream, recognizer, timeout_seconds=10):
     """Asks the user for confirmation and listens for a Yes/No answer (Reads partials for 0ms latency)."""
     speak(f"Confirm: {action_description}?", stream)
     print(f"\n[CONFIRMATION REQUIRED] Say 'Yes' to execute or 'No' to cancel... (Listening for {timeout_seconds}s)")
