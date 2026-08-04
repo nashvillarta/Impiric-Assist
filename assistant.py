@@ -10,10 +10,29 @@ import subprocess
 import requests
 import webbrowser
 import voice_lines
+import discord_control
+import wake_word
+import aliases
 from vosk import Model, KaldiRecognizer
 
 # --- Global State ---
 PLANES_LOCKED = False
+
+# Set true to exercise the whole Discord flow -- resolve, confirm, focus,
+# right-click, locate the menu item -- without actually disconnecting anyone.
+DISCORD_DRY_RUN = False
+
+# Nicknames and Vosk mishearings, mapped to real Discord usernames. Loaded
+# from a gitignored file: Vosk has no vocabulary entry for handles like
+# "Carol", so aliases are often the only way to reach someone by voice --
+# but other people's handles are not this repo's to publish. Copy
+# discord_aliases.example.json to discord_aliases.json to set yours up.
+DISCORD_ALIASES = aliases.load()
+
+# Your own Discord display name, used to work out which voice channel you are
+# in. Read from the same gitignored file as the aliases: it is a real handle.
+# Until it is set the disconnect command deliberately does nothing.
+DISCORD_MY_USERNAME = aliases.load_me()
 
 # --- Voice Pack (pre-rendered audio, see tools/generate_voice_pack.py) ---
 VOICE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "voice")
@@ -222,9 +241,91 @@ You MUST respond ONLY in valid JSON format. Example: {"action": "push", "amount"
         print(f"\n[Ollama Error] Could not reach the LLM: {e}")
         return {"action": "unknown", "amount": 1}
 
+DISCORD_VERBS = ["kick", "disconnect", "boot", "remove"]
+
+
+def handle_discord_kick(phrase, stream, recognizer):
+    """Disconnects a named person from Discord voice. Returns True if handled.
+
+    Every failure path here ends in doing nothing: disconnecting the wrong
+    person is worse than the command not working.
+    """
+    spoken = None
+    for verb in DISCORD_VERBS:
+        if verb in phrase:
+            spoken = phrase.split(verb, 1)[1].strip()
+            break
+    if spoken is None:
+        return False
+
+    win = discord_control.find_window()
+    if win is None:
+        speak("Discord is not open.", stream)
+        return True
+
+    # Scoped to your own channel: the member list spans the whole server, and
+    # disconnecting someone from a call you are not in would be baffling.
+    members = discord_control.members_in_my_channel(
+        discord_control.list_voice_members(win), DISCORD_MY_USERNAME
+    )
+    if not members:
+        speak("Nobody by that name is in voice.", stream)
+        return True
+
+    match = discord_control.resolve_name(spoken, members, aliases=DISCORD_ALIASES)
+    if match is None:
+        # Covers both "no one close enough" and "two people equally close" --
+        # resolve_name refuses rather than guessing between them.
+        speak("Nobody by that name is in voice.", stream)
+        return True
+
+    if not confirm_action(f"Disconnect {match.username} from voice", stream, recognizer):
+        return True
+
+    # Re-resolve: the confirm window is ten seconds, and people leave calls.
+    # Acting on the element we found before confirmation would disconnect
+    # whoever the list shifted into that row.
+    fresh = discord_control.list_voice_members(win)
+    still_there = next(
+        (m for m in fresh if m.username == match.username), None
+    )
+    if still_there is None:
+        print(f"\n[Discord] {match.username} is no longer in voice; doing nothing.")
+        return True
+
+    if not discord_control.focus_window(win):
+        print("\n[Discord] Could not bring Discord forward; doing nothing.")
+        return True
+
+    ok = discord_control.disconnect(
+        still_there, uia=discord_control.Uia(), dry_run=DISCORD_DRY_RUN
+    )
+    if not ok:
+        print("\n[Discord] No 'Disconnect' item in the menu; nothing clicked.")
+        return True
+
+    if DISCORD_DRY_RUN:
+        # Must not say "Okay." here: by ear that is indistinguishable from a
+        # real disconnect, so a dry run looks like a working feature that
+        # mysteriously leaves everyone connected.
+        print(f"\n[Discord] DRY RUN: would have disconnected {still_there.username}.")
+        # No pre-rendered WAV for this: it falls through to native TTS, which
+        # is the same voice as the pack, and dry run is not a normal mode.
+        speak("Dry run. Nobody was disconnected.", stream)
+        return True
+
+    speak("Okay.", stream)
+    return True
+
+
 def process_and_execute(phrase, stream, recognizer):
     """Checks fast-path keyword matches first, then falls back to Ollama LLM, requiring confirmation before execution."""
-    
+
+    # 0. Discord disconnect. First because "remove"/"kick" are distinctive and
+    # must not be swallowed by the display-movement matches below.
+    if handle_discord_kick(phrase, stream, recognizer):
+        return
+
     # 1. "A One" -> Toggle orientation planes
     if any(word in phrase for word in ["a one", "a 1", "a1", "ae one", "ay one", "a wine"]):
         state_str = "Lock" if not PLANES_LOCKED else "Unlock"
@@ -331,9 +432,10 @@ def main():
 
     print("\n==================================================")
     print("  SAFE SMART AI ASSISTANT (Confirmation Required)")
-    print("  - 'Computer B One' : Clear screens (Requires 'Yes')")
-    print("  - 'Computer A One' : Lock/Unlock orientation")
-    print("  - 'Computer Open Gemini' : Launches Gemini Web Chat")
+    print("  - 'Computer B One'   : Clear screens (Requires 'Yes')")
+    print("  - 'Computer A One'   : Lock/Unlock orientation")
+    print("  - 'Computer Open Gemini': Launches Gemini Web Chat")
+    print("  - 'Computer Kick <name>': Disconnect someone from Discord voice")
     print("==================================================")
 
     speak("Assistant ready.", stream)
@@ -358,10 +460,13 @@ def main():
                     process_and_execute(phrase, stream, recognizer)
                     listening_for_command = False
                 
-                elif "computer" in phrase:
-                    command_part = phrase.split("computer", 1)[-1].strip()
-                    
-                    if command_part: 
+                else:
+                    # None means no wake word; "" means it was heard alone, so
+                    # arm and wait for the command on the next utterance.
+                    command_part = wake_word.split(phrase)
+                    if command_part is None:
+                        pass
+                    elif command_part:
                         process_and_execute(command_part, stream, recognizer)
                     else:
                         speak("Listening.", stream)

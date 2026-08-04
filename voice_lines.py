@@ -24,9 +24,17 @@ FIXED_DESCRIPTIONS = [
 ]
 
 # Lines spoken outside the "Confirm: ...?" pattern.
+#
+# The Discord disconnect confirmation ("Confirm: Disconnect Alice from voice?")
+# is deliberately absent: it contains a username, which cannot be known ahead
+# of time, so it falls through to native TTS. That costs nothing now the pack
+# itself is native -- the fallback is the same voice -- and it keeps other
+# people's handles out of this repo entirely.
 STANDALONE_LINES = [
     "Command cancelled.",
     "Timed out. Action cancelled.",
+    "Nobody by that name is in voice.",
+    "Discord is not open.",
 ]
 
 # Spoken feedback lines that replace the old beeps/chimes.

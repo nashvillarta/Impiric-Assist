@@ -3,8 +3,8 @@ import voice_lines
 
 
 class TestVoiceLines(unittest.TestCase):
-    def test_speech_line_count_is_36(self):
-        self.assertEqual(len(voice_lines.all_speech_lines()), 36)
+    def test_speech_line_count_is_38(self):
+        self.assertEqual(len(voice_lines.all_speech_lines()), 38)
 
     def test_no_duplicate_lines(self):
         lines = voice_lines.all_speech_lines()
