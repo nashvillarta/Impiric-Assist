@@ -183,3 +183,8 @@ cython_debug/
 # Vosk model folder
 model/
 *.zip
+
+# Generated voice pack (see tools/generate_voice_pack.py)
+voice/
+# Local Discord aliases: maps nicknames to real handles, not ours to publish
+discord_aliases.json

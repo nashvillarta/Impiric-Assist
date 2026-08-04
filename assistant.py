@@ -1,50 +1,93 @@
+import sys
+
 import winsound
 import pyautogui
 import pyaudio
 import json
 import time
 import os
-import sys
+import subprocess
 import requests
 import webbrowser
+import voice_lines
+import discord_control
+import wake_word
+import aliases
 from vosk import Model, KaldiRecognizer
 
 # --- Global State ---
 PLANES_LOCKED = False
 
-# --- AI Voice (Text-to-Speech) Setup ---
-def speak(text):
-    """Prints text and speaks it out loud using Windows Native TTS (Offline)."""
-    print(f"\n[AI Voice]: \"{text}\"")
+# Set true to exercise the whole Discord flow -- resolve, confirm, focus,
+# right-click, locate the menu item -- without actually disconnecting anyone.
+DISCORD_DRY_RUN = False
+
+# Nicknames and Vosk mishearings, mapped to real Discord usernames. Loaded
+# from a gitignored file: Vosk has no vocabulary entry for handles like
+# "Carol", so aliases are often the only way to reach someone by voice --
+# but other people's handles are not this repo's to publish. Copy
+# discord_aliases.example.json to discord_aliases.json to set yours up.
+DISCORD_ALIASES = aliases.load()
+
+# Your own Discord display name, used to work out which voice channel you are
+# in. Read from the same gitignored file as the aliases: it is a real handle.
+# Until it is set the disconnect command deliberately does nothing.
+DISCORD_MY_USERNAME = aliases.load_me()
+
+# --- Voice Pack (pre-rendered audio, see tools/generate_voice_pack.py) ---
+VOICE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "voice")
+
+
+def _play_wav(path, stream=None):
+    """Plays a WAV, pausing the mic so the assistant does not hear itself.
+
+    Returns True if it played. Blocking on purpose: speech must finish before
+    confirm_action starts listening.
+    """
+    if not os.path.exists(path):
+        return False
     try:
-        escaped_text = text.replace("'", "")
-        os.system(f'powershell -Command "Add-Type -AssemblyName System.Speech; (New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak(\'{escaped_text}\')"')
+        if stream is not None:
+            stream.stop_stream()
+        try:
+            winsound.PlaySound(path, winsound.SND_FILENAME)
+        finally:
+            if stream is not None:
+                stream.start_stream()
+        return True
+    except Exception as e:
+        print(f"[Voice Warning] Could not play {os.path.basename(path)}: {e}")
+        return False
+
+
+def _speak_native(text):
+    """Platform TTS. Only reached when the voice pack has no line for this text."""
+    try:
+        # Text goes in over stdin, never interpolated into the command line:
+        # it can carry an LLM-supplied amount, and os.system would make that
+        # a shell injection (stripping ' does not stop " or ; or $(...)).
+        script = (
+            "Add-Type -AssemblyName System.Speech; "
+            "(New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak([Console]::In.ReadToEnd())"
+        )
+        subprocess.run(["powershell", "-Command", script], input=text, text=True)
     except Exception as e:
         print(f"[TTS Warning] Could not initialize voice engine: {e}")
 
-# --- Custom Tones ---
-def play_startup_chime():
-    winsound.Beep(440, 150)
-    winsound.Beep(554, 150)
-    winsound.Beep(659, 150)
-    winsound.Beep(880, 300)
 
-def play_pleasant_tone():
-    winsound.Beep(587, 80)
-    winsound.Beep(880, 120)
+# --- AI Voice (Text-to-Speech) Setup ---
+def speak(text, stream=None):
+    """Prints text and speaks it, preferring the pre-rendered voice pack."""
+    print(f"\n[AI Voice]: \"{text}\"")
+    if _play_wav(os.path.join(VOICE_DIR, voice_lines.slug(text) + ".wav"), stream):
+        return
+    _speak_native(text)
 
-def play_cancel_tone():
-    winsound.Beep(880, 80)
-    winsound.Beep(587, 120)
-
-def play_error_tone():
-    winsound.Beep(300, 150)
-    winsound.Beep(250, 200)
 
 # --- Confirmation Listener ---
-def confirm_action(action_description, stream, recognizer, timeout_seconds=5):
+def confirm_action(action_description, stream, recognizer, timeout_seconds=10):
     """Asks the user for confirmation and listens for a Yes/No answer (Reads partials for 0ms latency)."""
-    speak(f"Confirm: {action_description}?")
+    speak(f"Confirm: {action_description}?", stream)
     print(f"\n[CONFIRMATION REQUIRED] Say 'Yes' to execute or 'No' to cancel... (Listening for {timeout_seconds}s)")
     
     start_time = time.time()
@@ -71,22 +114,20 @@ def confirm_action(action_description, stream, recognizer, timeout_seconds=5):
             # The second it sees these words, it triggers. No waiting for silence!
             if any(w in text for w in ["yes", "yeah", "yup", "confirm", "do it", "ok", "okay", "sure", "ya", "aye"]):
                 print(f"\nConfirmation response caught: \"{text}\"")
-                play_pleasant_tone()
+                speak("Okay.", stream)
                 return True
             elif any(w in text for w in ["no", "nope", "cancel", "stop", "dont", "don't", "nah"]):
                 print(f"\nConfirmation response caught: \"{text}\"")
-                play_cancel_tone()
-                speak("Command cancelled.")
+                speak("Command cancelled.", stream)
                 return False
 
     print("\n[CONFIRMATION TIMEOUT] No confirmation received.")
-    play_cancel_tone()
-    speak("Timed out. Action cancelled.")
+    speak("Timed out. Action cancelled.", stream)
     return False
 
 # --- Number Parsing Helper ---
 def parse_number(text):
-    number_words = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10}
+    number_words = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10, "too": 2}  # "to"/"for" deliberately excluded: too ambiguous, they show up in normal command phrases
     for word in text.split():
         if word.isdigit():
              return int(word)
@@ -200,9 +241,91 @@ You MUST respond ONLY in valid JSON format. Example: {"action": "push", "amount"
         print(f"\n[Ollama Error] Could not reach the LLM: {e}")
         return {"action": "unknown", "amount": 1}
 
+DISCORD_VERBS = ["kick", "disconnect", "boot", "remove"]
+
+
+def handle_discord_kick(phrase, stream, recognizer):
+    """Disconnects a named person from Discord voice. Returns True if handled.
+
+    Every failure path here ends in doing nothing: disconnecting the wrong
+    person is worse than the command not working.
+    """
+    spoken = None
+    for verb in DISCORD_VERBS:
+        if verb in phrase:
+            spoken = phrase.split(verb, 1)[1].strip()
+            break
+    if spoken is None:
+        return False
+
+    win = discord_control.find_window()
+    if win is None:
+        speak("Discord is not open.", stream)
+        return True
+
+    # Scoped to your own channel: the member list spans the whole server, and
+    # disconnecting someone from a call you are not in would be baffling.
+    members = discord_control.members_in_my_channel(
+        discord_control.list_voice_members(win), DISCORD_MY_USERNAME
+    )
+    if not members:
+        speak("Nobody by that name is in voice.", stream)
+        return True
+
+    match = discord_control.resolve_name(spoken, members, aliases=DISCORD_ALIASES)
+    if match is None:
+        # Covers both "no one close enough" and "two people equally close" --
+        # resolve_name refuses rather than guessing between them.
+        speak("Nobody by that name is in voice.", stream)
+        return True
+
+    if not confirm_action(f"Disconnect {match.username} from voice", stream, recognizer):
+        return True
+
+    # Re-resolve: the confirm window is ten seconds, and people leave calls.
+    # Acting on the element we found before confirmation would disconnect
+    # whoever the list shifted into that row.
+    fresh = discord_control.list_voice_members(win)
+    still_there = next(
+        (m for m in fresh if m.username == match.username), None
+    )
+    if still_there is None:
+        print(f"\n[Discord] {match.username} is no longer in voice; doing nothing.")
+        return True
+
+    if not discord_control.focus_window(win):
+        print("\n[Discord] Could not bring Discord forward; doing nothing.")
+        return True
+
+    ok = discord_control.disconnect(
+        still_there, uia=discord_control.Uia(), dry_run=DISCORD_DRY_RUN
+    )
+    if not ok:
+        print("\n[Discord] No 'Disconnect' item in the menu; nothing clicked.")
+        return True
+
+    if DISCORD_DRY_RUN:
+        # Must not say "Okay." here: by ear that is indistinguishable from a
+        # real disconnect, so a dry run looks like a working feature that
+        # mysteriously leaves everyone connected.
+        print(f"\n[Discord] DRY RUN: would have disconnected {still_there.username}.")
+        # No pre-rendered WAV for this: it falls through to native TTS, which
+        # is the same voice as the pack, and dry run is not a normal mode.
+        speak("Dry run. Nobody was disconnected.", stream)
+        return True
+
+    speak("Okay.", stream)
+    return True
+
+
 def process_and_execute(phrase, stream, recognizer):
     """Checks fast-path keyword matches first, then falls back to Ollama LLM, requiring confirmation before execution."""
-    
+
+    # 0. Discord disconnect. First because "remove"/"kick" are distinctive and
+    # must not be swallowed by the display-movement matches below.
+    if handle_discord_kick(phrase, stream, recognizer):
+        return
+
     # 1. "A One" -> Toggle orientation planes
     if any(word in phrase for word in ["a one", "a 1", "a1", "ae one", "ay one", "a wine"]):
         state_str = "Lock" if not PLANES_LOCKED else "Unlock"
@@ -231,7 +354,7 @@ def process_and_execute(phrase, stream, recognizer):
         return
 
     # 5. Quick Pull
-    if any(word in phrase for word in ["pull", "pool", "pole", "closer", "near", "all by", "oh by"]):
+    if any(word in phrase for word in ["pull", "pool", "pole", "closer", "near", "all by", "oh by", "poll", "paul", "cool"]):
         amount = parse_number(phrase)
         if confirm_action(f"Pull displays closer by {amount}", stream, recognizer):
             trigger_action("Pull", 'up', amount)
@@ -248,7 +371,12 @@ def process_and_execute(phrase, stream, recognizer):
     print("Thinking (LLM)...")
     intent_data = query_ollama(phrase)
     action = intent_data.get("action", "unknown")
-    amount = intent_data.get("amount", 1)
+    # The LLM can return anything here, so clamp it to a sane int before it
+    # reaches a spoken string or range(). Also keeps it inside the voiced range.
+    try:
+        amount = max(1, min(int(intent_data.get("amount", 1)), voice_lines.MAX_AMOUNT))
+    except (TypeError, ValueError):
+        amount = 1
     
     if action == "recenter":
         if confirm_action("Recenter displays", stream, recognizer):
@@ -287,7 +415,7 @@ def process_and_execute(phrase, stream, recognizer):
             send_shortcut('7')
     else:
         print(f"\n[ACTION] Unknown intent.")
-        play_error_tone()
+        speak("Sorry, I did not understand that.", stream)
 
 def main():
     if not os.path.exists("model"):
@@ -304,12 +432,13 @@ def main():
 
     print("\n==================================================")
     print("  SAFE SMART AI ASSISTANT (Confirmation Required)")
-    print("  - 'Computer B One' : Clear screens (Requires 'Yes')")
-    print("  - 'Computer A One' : Lock/Unlock orientation")
-    print("  - 'Computer Open Gemini' : Launches Gemini Web Chat")
+    print("  - 'Computer B One'   : Clear screens (Requires 'Yes')")
+    print("  - 'Computer A One'   : Lock/Unlock orientation")
+    print("  - 'Computer Open Gemini': Launches Gemini Web Chat")
+    print("  - 'Computer Kick <name>': Disconnect someone from Discord voice")
     print("==================================================")
-    
-    play_startup_chime()
+
+    speak("Assistant ready.", stream)
     print("\nReady! Listening...\n")
 
     listening_for_command = False
@@ -331,13 +460,16 @@ def main():
                     process_and_execute(phrase, stream, recognizer)
                     listening_for_command = False
                 
-                elif "computer" in phrase:
-                    command_part = phrase.split("computer", 1)[-1].strip()
-                    
-                    if command_part: 
+                else:
+                    # None means no wake word; "" means it was heard alone, so
+                    # arm and wait for the command on the next utterance.
+                    command_part = wake_word.split(phrase)
+                    if command_part is None:
+                        pass
+                    elif command_part:
                         process_and_execute(command_part, stream, recognizer)
-                    else: 
-                        play_pleasant_tone()
+                    else:
+                        speak("Listening.", stream)
                         print("--> Wake word acknowledged! Listening for command...")
                         listening_for_command = True
 
